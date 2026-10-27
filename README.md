@@ -57,7 +57,7 @@ With a **guest profile** (set by the owner or in Settings), file access is limit
 | Profile | `owner` has no limits; `guest` is limited to the listed folders |
 | Guest folders | one folder per line that Claude may read and change |
 | Default model / Auto | which models to use |
-| API web search | lets Claude search the web through the API at $0.01 per search; TokenSaver's own web tool is free |
+| API web search | off by default; TokenSaver's own web tool is free. Turn on only if you need the API's search at $0.01 per search |
 | Screenshots per turn | caps real screenshots, since every image costs tokens |
 | TokenSaver folder | where TokenSaver keeps jobs, cache and its config |
 | TokenSaver config.json | local AI endpoint and model, blocked paths, etc. |

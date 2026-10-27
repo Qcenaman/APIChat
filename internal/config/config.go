@@ -86,7 +86,7 @@ func Defaults() Config {
 		Model:              "auto",
 		Auto:               AutoModels{Simple: "claude-haiku-5-5", Normal: "claude-sonnet-5-5", Hard: "claude-opus-5-5"},
 		Router:             "claude-haiku-5-5",
-		WebSearch:          true,
+		WebSearch:          false,
 		WebSearchMaxUses:   5,
 		CacheTTL:           "1h",
 		MaxTokens:          16000,
