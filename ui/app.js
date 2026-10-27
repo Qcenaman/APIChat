@@ -379,7 +379,7 @@ function autosize() { const t = $('#input'); t.style.height = 'auto'; t.style.he
 
 // ---------- settings ----------
 function modal(title, body) { $('#modal-title').textContent = title; const b = $('#modal-body'); b.innerHTML = ''; b.appendChild(body); $('#modal').classList.remove('hidden'); }
-function closeModal() { $('#modal').classList.add('hidden'); }
+function closeModal() { if (!S.settings.has_key && $('#modal-title').textContent === 'Settings') { const m = $('#modal .save-msg'); if (m) { m.textContent = 'Paste the API key and click Save first'; m.style.color = 'var(--err)'; } return; } $('#modal').classList.add('hidden'); }
 
 function field(form, label, input, hint) { form.appendChild(el('label', '', label)); form.appendChild(input); if (hint) form.appendChild(el('div', 'hint', hint)); return input; }
 function inp(type, value, attrs = {}) { const i = el('input'); i.type = type; i.value = value == null ? '' : value; Object.assign(i, attrs); return i; }
@@ -391,7 +391,7 @@ async function openSettings() {
   const s = await api('/api/settings');
   const form = el('div', 'form');
   form.appendChild(el('h3', '', 'API'));
-  const key = field(form, 'API key', inp('password', '', { placeholder: s.has_key ? '(saved; paste to replace)' : 'sk-ant-…' }));
+  const key = field(form, 'API key', inp('password', '', { placeholder: s.has_key ? 'paste a new key to replace the saved one' : 'sk-ant-…' }), s.has_key ? '✓ A key is saved' : 'No key yet. Paste the key from the Claude Console and click Save.');
   const budget = field(form, 'Monthly credit (USD)', inp('number', s.budget, { step: '1' }));
   const budgetDay = field(form, 'Billing cycle day', inp('number', s.budget_day, { min: 1, max: 28 }), 'Day of month your Max credits refresh');
   const userName = field(form, 'Your name', inp('text', s.user_name));
@@ -441,13 +441,15 @@ async function openSettings() {
     if (key.value.trim()) body.api_key = key.value.trim();
     try {
       S.settings = await api('/api/settings', { method: 'PUT', json: body });
-      if (tsCfg.value !== tsCfg.dataset.orig) await api('/api/tokensaver/config', { method: 'PUT', json: { text: tsCfg.value } });
-      msg.textContent = 'Saved'; await loadState(); await loadModels(); setTimeout(closeModal, 500);
+      if (tsCfg.dataset.orig !== undefined && tsCfg.value !== tsCfg.dataset.orig) await api('/api/tokensaver/config', { method: 'PUT', json: { text: tsCfg.value } });
+      msg.textContent = 'Saved'; await loadState(); await loadModels();
+      if (S.settings.has_key) setTimeout(closeModal, 500); else { msg.textContent = 'Saved, but no API key yet'; msg.style.color = 'var(--err)'; }
     } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--err)'; }
   };
   actions.appendChild(msg); actions.appendChild(save);
   const box = el('div'); box.appendChild(form); box.appendChild(actions);
   modal('Settings', box);
+  if (!s.has_key) setTimeout(() => key.focus(), 50);
 }
 
 async function openUsage() {
@@ -486,7 +488,7 @@ document.addEventListener('dragleave', () => document.body.classList.remove('dra
 document.addEventListener('drop', (e) => { e.preventDefault(); document.body.classList.remove('dragover'); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]); });
 $('#title').addEventListener('change', async () => { if (!S.chat) return; await api('/api/chats/' + S.chat.id, { method: 'PATCH', json: { title: $('#title').value } }); S.chat.title = $('#title').value; loadState(); });
 $('#model').addEventListener('change', async () => { if (!S.chat) return; await api('/api/chats/' + S.chat.id, { method: 'PATCH', json: { model: $('#model').value } }); S.chat.model = $('#model').value; });
-$('#open-settings').onclick = openSettings;
+$('#open-settings').onclick = () => openSettings().catch(e => notice('Settings failed to open: ' + e.message, 'err'));
 $('#open-usage').onclick = openUsage;
 $('#modal-close').onclick = closeModal;
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
@@ -499,6 +501,6 @@ $('#head').addEventListener('click', (e) => { if (e.target.id === 'head') $('#si
   if (last && S.chats.some(c => c.id === last)) await openChat(last);
   else if (S.chats.length) await openChat(S.chats[0].id);
   else await newChat();
-  if (!S.settings.has_key) openSettings();
+  if (!S.settings.has_key) openSettings().catch(e => notice('Settings failed to open: ' + e.message, 'err'));
 })();
 })();
