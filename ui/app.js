@@ -418,6 +418,12 @@ async function openSettings() {
   const toolsOff = field(form, 'Guest tools off', inp('text', (g.tools_off || []).join(', ')), 'tool or tool.action, comma separated');
   const confirmL = field(form, 'Guest asks first for', inp('text', (g.confirm || []).join(', ')));
   const elevated = field(form, 'Guest may run as admin', chk(g.elevated));
+  form.appendChild(el('h3', '', 'Remote assistance (over Tailscale)'));
+  const as = s.assist || {};
+  const asOn = field(form, 'Allow assistance', chk(as.enabled), 'A helper can run tools on this PC after you accept a request on screen. Needs Tailscale on both PCs; restart after changing.');
+  const asPw = field(form, 'Assist password', inp('password', '', { placeholder: as.has_password ? 'saved; type to replace' : 'choose a password to share with the helper' }));
+  const asMin = field(form, 'Session length (min)', inp('number', as.minutes || 60));
+  const asPort = field(form, 'Assist port', inp('number', as.port || 47822));
   form.appendChild(el('h3', '', 'TokenSaver'));
   const tsRoot = field(form, 'TokenSaver folder', inp('text', s.tokensaver_root), 'Restart after changing');
   const tsCfg = field(form, 'TokenSaver config.json', ta('', 6));
@@ -437,6 +443,7 @@ async function openSettings() {
       screenshots_per_turn: +shots.value, system_prompt: sys.value, profile: profile.value,
       guest: { folders: lines(folders.value), tools_off: lines(toolsOff.value), confirm: lines(confirmL.value), elevated: elevated.checked },
       tokensaver_root: tsRoot.value, port: +port.value, browser: browser.value,
+      assist: { enabled: asOn.checked, password: asPw.value, minutes: +asMin.value, port: +asPort.value },
     };
     if (key.value.trim()) body.api_key = key.value.trim();
     try {
@@ -474,6 +481,61 @@ async function openUsage() {
   modal('Usage', box);
 }
 
+// ---------- remote assistance ----------
+function assistBanner(sess) {
+  let b = document.getElementById('assist-banner');
+  if (!sess) { if (b) b.remove(); return; }
+  if (!b) {
+    b = el('div', 'assist-banner'); b.id = 'assist-banner';
+    b.appendChild(el('span', 'txt'));
+    const log = el('button', 'ghost', 'Log'); log.onclick = openAssistLog;
+    const end = el('button', 'danger', 'End assistance'); end.onclick = () => api('/api/assist/end', { method: 'POST' });
+    b.appendChild(log); b.appendChild(end);
+    $('#main').insertBefore(b, $('#head'));
+  }
+  $('.txt', b).textContent = `${sess.helper} is helping on this PC until ${new Date(sess.until).toLocaleTimeString()} · ${sess.count || 0} commands`;
+}
+function assistPopup(d) {
+  if (document.getElementById('assist-popup')) return;
+  const box = el('div', 'confirm'); box.id = 'assist-popup';
+  box.appendChild(el('div', 'q', `${d.helper} wants to help on this PC for ${d.minutes} minutes.`));
+  box.appendChild(el('div', '', 'They will be able to run TokenSaver tools here (files, commands, screen) with your current profile limits. Every command shows in the log, and you can end it at any time.'));
+  const btns = el('div', 'btns');
+  const ok = el('button', 'primary', 'Accept'); const no = el('button', '', 'Decline');
+  ok.onclick = () => { api('/api/assist/answer', { method: 'POST', json: { id: d.id, ok: true } }); box.remove(); };
+  no.onclick = () => { api('/api/assist/answer', { method: 'POST', json: { id: d.id, ok: false } }); box.remove(); };
+  btns.appendChild(ok); btns.appendChild(no); box.appendChild(btns);
+  const wrap = el('div'); wrap.id = 'assist-popup-wrap'; wrap.appendChild(box);
+  document.body.appendChild(wrap);
+}
+let assistLog = [];
+async function openAssistLog() {
+  const st = await api('/api/assist/status'); assistLog = st.log || [];
+  const box = el('div');
+  if (!assistLog.length) box.appendChild(el('div', 'notice', 'No commands yet.'));
+  for (const e of assistLog.slice().reverse()) {
+    const card = el('div', 'tool open' + (e.error ? ' err' : ' done'));
+    const head = el('div', 'tool-head'); head.appendChild(el('span', 'dot')); head.appendChild(el('span', 'name', e.tool)); head.appendChild(el('span', 'sum', (e.action || '') + ' · ' + new Date(e.time).toLocaleTimeString()));
+    const body = el('div', 'tool-body'); body.appendChild(el('pre', '', JSON.stringify(e.args, null, 2))); body.appendChild(el('div', 'lbl', 'result')); body.appendChild(el('pre', '', e.result || ''));
+    card.appendChild(head); card.appendChild(body); box.appendChild(card);
+  }
+  modal('Assistance log', box);
+}
+function subscribeAssist() {
+  const es = new EventSource('/api/assist/events?token=' + TOKEN);
+  es.onmessage = (e) => {
+    const ev = JSON.parse(e.data); const d = ev.data || {};
+    switch (ev.type) {
+      case 'assist_status': assistBanner(d.active ? d.session : null); if (d.request) assistPopup(d.request); break;
+      case 'assist_request': assistPopup(d); break;
+      case 'assist_start': assistBanner(d.session); break;
+      case 'assist_cmd': { const b = document.getElementById('assist-banner'); if (b) $('.txt', b).textContent += ''; setStatus('helper: ' + d.tool + ' ' + (d.action || '')); break; }
+      case 'assist_result': api('/api/assist/status').then(st => assistBanner(st.active ? st.session : null)); if (!S.busy) setStatus(''); break;
+      case 'assist_end': case 'assist_declined': assistBanner(null); { const p = document.getElementById('assist-popup-wrap'); if (p) p.remove(); } break;
+    }
+  };
+}
+
 // ---------- wiring ----------
 $('#new-chat').onclick = newChat;
 $('#send').onclick = send;
@@ -497,6 +559,7 @@ $('#head').addEventListener('click', (e) => { if (e.target.id === 'head') $('#si
 (async () => {
   await loadState();
   loadModels();
+  subscribeAssist();
   const last = localStorage.getItem('apichat.last');
   if (last && S.chats.some(c => c.id === last)) await openChat(last);
   else if (S.chats.length) await openChat(S.chats[0].id);

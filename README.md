@@ -10,18 +10,15 @@ A desktop chat app for Claude that runs on your own Windows PC. It talks to the 
 
 ## Install
 
-1. Download `apichat-0.1.0-windows.zip` from the latest [release](https://github.com/Qcenaman/APIChat/releases) and unzip it (or take `dist\apichat.exe` from this repo).
-2. Put it anywhere, for example `Downloads`, then double-click it once, or run it from a command prompt:
-   ```
-   apichat.exe install
-   ```
-   This copies the program to `D:\Claude Apps\APIChat` (or `%LOCALAPPDATA%\APIChat` if there is no D: drive) and creates `Open APIChat.cmd` next to it.
-3. Double-click **Open APIChat.cmd**. A window opens.
-4. The Settings panel appears on first start. Paste the **API key** and click **Save**.
+1. Download the zip from the latest [release](https://github.com/Qcenaman/APIChat/releases) and unzip it (or take `dist\apichat.exe` from this repo).
+2. Double-click `apichat.exe`. The first run copies it to `C:\Claude Apps\APIChat` (or `%LOCALAPPDATA%\APIChat`), creates `Open APIChat.cmd` there, and opens the app window.
+3. The Settings panel appears on first start. Paste the **API key** and click **Save**.
+
+From then on, open it with **Open APIChat.cmd** or the copied `apichat.exe`. New versions: run the new `apichat.exe` once; it replaces the old copy and keeps your settings, chats and key.
 
 Keep the small console window open while you use the app; closing it stops APIChat.
 
-**If Windows Defender or SmartScreen complains:** the exe is not code-signed, so Defender's machine-learning check sometimes flags it as "potentially unwanted". Choose **More info → Run anyway**, or add the install folder (`D:\Claude Apps\APIChat`) as an exclusion in Windows Security → Virus & threat protection → Exclusions. If Defender already removed the file, restore it from Protection history, then add the exclusion and run `install` again.
+**If Windows Defender or SmartScreen complains:** the exe is not code-signed, so Defender's machine-learning check sometimes flags it as "potentially unwanted". Choose **More info → Run anyway**, or add the install folder (`C:\Claude Apps\APIChat`) as an exclusion in Windows Security → Virus & threat protection → Exclusions. If Defender already removed the file, restore it from Protection history, then add the exclusion and run `apichat.exe` again.
 
 ## Using it
 
@@ -62,7 +59,7 @@ With a **guest profile** (set by the owner or in Settings), file access is limit
 | TokenSaver folder | where TokenSaver keeps jobs, cache and its config |
 | TokenSaver config.json | local AI endpoint and model, blocked paths, etc. |
 
-Settings live in `D:\Claude Apps\APIChat\data\config.json`; chats, uploads and the usage log are in the same `data` folder.
+Settings live in `C:\Claude Apps\APIChat\data\config.json`; chats, uploads and the usage log are in the same `data` folder.
 
 ## Costs
 
@@ -78,9 +75,18 @@ TokenSaver can use a model running on this PC for `local_ai`, `web ask`, `rag` a
 
 Without it, those tools simply report that no local model is available; everything else works.
 
+## Remote assistance (optional)
+
+The owner can help on your PC from theirs, with your permission each time. It works over [Tailscale](https://tailscale.com), a private network between the two computers, so nothing is open to the internet.
+
+1. Install Tailscale on this PC (`winget install tailscale.tailscale`, or the installer from tailscale.com) and sign in with the account the owner tells you to use.
+2. In APIChat **Settings → Remote assistance**, tick **Allow assistance**, set the **Assist password** the owner gave you, Save, and restart APIChat. The console window shows `assist: listening on 100.x.x.x:47822`; tell the owner that address.
+3. When the owner connects, a popup asks whether you accept help for a set number of minutes. Nothing runs before you click **Accept**.
+4. While a session is active, a yellow bar shows who is helping and how many commands ran. **Log** shows every command and result; **End assistance** stops it immediately. Actions that need confirmation under your profile still ask you first.
+
 ## Updating
 
-Download the new `apichat.exe`, run `apichat.exe install` again, and reopen the app.
+Download the new zip, unzip, and run the new `apichat.exe` once. Settings, chats and the key are kept.
 
 ## Building from source
 

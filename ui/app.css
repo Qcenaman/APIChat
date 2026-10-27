@@ -131,3 +131,10 @@ textarea { resize: none; }
   #side.show { transform: none; }
   #head::before { content: "☰"; cursor: pointer; padding: 0 6px; }
 }
+
+.assist-banner { display: flex; gap: 8px; align-items: center; padding: 6px 16px; background: var(--warn); color: #1f1f1f; font-size: 13px; }
+.assist-banner .txt { flex: 1; }
+.assist-banner button { padding: 3px 10px; font-size: 12px; color: #1f1f1f; }
+.assist-banner button.danger { color: #fff; }
+#assist-popup-wrap { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 20; }
+#assist-popup { width: min(520px, 92vw); font-size: 14px; }

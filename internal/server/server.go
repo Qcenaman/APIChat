@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/qcenaman/apichat/internal/api"
+	"github.com/qcenaman/apichat/internal/assist"
 	"github.com/qcenaman/apichat/internal/chat"
 	"github.com/qcenaman/apichat/internal/config"
 	"github.com/qcenaman/apichat/internal/ts"
@@ -31,6 +32,7 @@ type Server struct {
 	Log     *usage.Log
 	Client  func() *api.Client
 	Version string
+	Assist  *assist.Manager
 
 	token string
 	index []byte
@@ -114,6 +116,20 @@ func (s *Server) Handler() http.Handler {
 		jsonOut(w, 200, map[string]any{"ok": s.Engine.Resolve(in.ID, in.OK)})
 	})
 	apiMux.HandleFunc("GET /api/usage", s.usage)
+	apiMux.HandleFunc("GET /api/assist/status", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, s.Assist.Status()) })
+	apiMux.HandleFunc("POST /api/assist/answer", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID string `json:"id"`
+			OK bool   `json:"ok"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		jsonOut(w, 200, map[string]any{"ok": s.Assist.Answer(in.ID, in.OK)})
+	})
+	apiMux.HandleFunc("POST /api/assist/end", func(w http.ResponseWriter, r *http.Request) {
+		s.Assist.End()
+		jsonOut(w, 200, map[string]any{"ok": true})
+	})
+	apiMux.HandleFunc("GET /api/assist/events", s.assistEvents)
 	apiMux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, config.Get().Public()) })
 	apiMux.HandleFunc("PUT /api/settings", s.putSettings)
 	apiMux.HandleFunc("GET /api/models", s.models)
@@ -136,6 +152,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		"usage":      sum,
 		"budget":     cfg.Budget,
 		"tokensaver": map[string]any{"version": ts.Version(), "root": ts.Root(), "tools": ts.ToolNames()},
+		"assist":     s.Assist.Status(),
 		"chats":      s.Store.List(),
 	})
 }
@@ -313,6 +330,41 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) assistEvents(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		bad(w, 500, errors.New("streaming unsupported"))
+		return
+	}
+	w.Header().Set("content-type", "text/event-stream")
+	w.Header().Set("cache-control", "no-store")
+	w.WriteHeader(200)
+	ch, cancel := s.Assist.Subscribe()
+	defer cancel()
+	b, _ := json.Marshal(assist.Event{Type: "assist_status", Data: s.Assist.Status()})
+	fmt.Fprintf(w, "data: %s\n\n", b)
+	fl.Flush()
+	tick := time.NewTicker(20 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev := <-ch:
+			b, _ := json.Marshal(ev)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+				return
+			}
+			fl.Flush()
+		case <-tick.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			fl.Flush()
+		}
+	}
+}
+
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -324,6 +376,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	merged := map[string]json.RawMessage{}
 	json.Unmarshal(cur, &merged)
 	for k, v := range in {
+		if k == "assist" {
+			var a map[string]json.RawMessage
+			json.Unmarshal(v, &a)
+			var pw string
+			json.Unmarshal(a["password"], &pw)
+			if strings.TrimSpace(pw) == "" {
+				b, _ := json.Marshal(cfg.Assist.Password)
+				a["password"] = b
+			}
+			delete(a, "has_password")
+			v, _ = json.Marshal(a)
+		}
 		if k == "api_key" {
 			var s string
 			json.Unmarshal(v, &s)

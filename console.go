@@ -37,6 +37,35 @@ func copyPlain(src, dst string) error {
 	return out.Close()
 }
 
+// selfSetup copies the program into its folder and makes the shortcut the
+// first time it is run from somewhere else. Settings and chats are kept.
+func selfSetup() {
+	target := installPath()
+	exe, _ := os.Executable()
+	if strings.EqualFold(filepath.Clean(exe), filepath.Clean(target)) {
+		return
+	}
+	if err := os.MkdirAll(config.Root(), 0o755); err != nil {
+		return
+	}
+	if _, err := os.Stat(target); err == nil {
+		os.Remove(target + ".old")
+		if err := os.Rename(target, target+".old"); err != nil {
+			fmt.Println("Note: the installed copy is in use, running this one instead:", err)
+			return
+		}
+	}
+	if err := copyPlain(exe, target); err != nil {
+		fmt.Println("Couldn't copy the app to", target+":", err)
+		return
+	}
+	if runtime.GOOS == "windows" {
+		cmd := filepath.Join(config.Root(), "Open APIChat.cmd")
+		os.WriteFile(cmd, []byte("@echo off\r\nstart \"APIChat\" /min \""+target+"\"\r\n"), 0o644)
+	}
+	fmt.Println("Installed to", target, "(settings and chats are kept between versions)")
+}
+
 func install() {
 	target := installPath()
 	exe, _ := os.Executable()

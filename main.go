@@ -10,7 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/json"
+	"strings"
+
 	"github.com/qcenaman/apichat/internal/api"
+	"github.com/qcenaman/apichat/internal/assist"
 	"github.com/qcenaman/apichat/internal/chat"
 	"github.com/qcenaman/apichat/internal/config"
 	"github.com/qcenaman/apichat/internal/guard"
@@ -38,13 +42,16 @@ func main() {
 		uninstall()
 	case "version":
 		fmt.Println("apichat", appVersion, "(TokenSaver", ts.Version()+")")
+	case "assist":
+		os.Exit(assistCLI(args[1:]))
 	default:
-		fmt.Println("usage: apichat [start|serve|install|uninstall|version]")
+		fmt.Println("usage: apichat [start|serve|install|uninstall|version|assist]")
 		os.Exit(2)
 	}
 }
 
 func start(openWindow bool) {
+	selfSetup()
 	cfg := config.Load()
 	if err := os.MkdirAll(config.Home(), 0o755); err != nil {
 		fmt.Println("Can't create", config.Home()+":", err)
@@ -76,12 +83,19 @@ func start(openWindow bool) {
 	}
 	engine := chat.NewEngine(store, g, log, filepath.Join(config.Home(), "uploads"), client)
 	srv := server.New(engine, store, log, client, appVersion)
+	am := assist.New(g)
+	srv.Assist = am
 	addr, err := srv.Listen(cfg.Port)
 	if err != nil {
 		fmt.Printf("Can't listen on port %d: %v\n", cfg.Port, err)
 		os.Exit(1)
 	}
 	fmt.Printf("APIChat %s (TokenSaver %s)\n%s\nprofile: %s   data: %s\n", appVersion, ts.Version(), addr+"/", cfg.Profile, config.Home())
+	if aaddr, err := am.Listen(); err != nil {
+		fmt.Println("assist:", err)
+	} else if aaddr != "" {
+		fmt.Println("assist: listening on", aaddr)
+	}
 	if openWindow {
 		openApp(addr + "/")
 	}
@@ -92,7 +106,72 @@ func start(openWindow bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+	am.Shutdown(ctx)
 	ts.Shutdown()
+}
+
+// assistCLI drives another PC's APIChat from this one:
+//
+//	apichat assist <host> <password> request [name] [minutes]
+//	apichat assist <host> <password> run <tool> '<json args>'
+//	apichat assist <host> <password> status|end|ping
+func assistCLI(a []string) int {
+	if len(a) < 3 {
+		fmt.Println("usage: apichat assist <host> <password> ping|request [name] [minutes]|run <tool> <json>|status|end")
+		return 2
+	}
+	c := assist.NewClient(a[0], a[1])
+	var res map[string]any
+	var err error
+	switch a[2] {
+	case "ping":
+		res, err = c.Ping()
+	case "request":
+		name, mins := "helper", 0
+		if len(a) > 3 {
+			name = a[3]
+		}
+		if len(a) > 4 {
+			fmt.Sscan(a[4], &mins)
+		}
+		res, err = c.Request(name, mins)
+	case "run":
+		if len(a) < 4 {
+			fmt.Println("run needs a tool name")
+			return 2
+		}
+		args := "{}"
+		if len(a) > 4 {
+			args = strings.Join(a[4:], " ")
+		}
+		res, err = c.Run(a[3], json.RawMessage(args))
+	case "status":
+		res, err = c.Status()
+	case "end":
+		res, err = c.End()
+	default:
+		fmt.Println("unknown assist command:", a[2])
+		return 2
+	}
+	if err != nil {
+		fmt.Println("error:", err)
+		if res != nil {
+			if t, _ := res["text"].(string); t != "" {
+				fmt.Println(t)
+			}
+		}
+		return 1
+	}
+	if t, ok := res["text"].(string); ok {
+		fmt.Println(t)
+		if imgs, _ := res["images"].([]any); len(imgs) > 0 {
+			fmt.Printf("(%d image(s) returned)\n", len(imgs))
+		}
+		return 0
+	}
+	b, _ := json.MarshalIndent(res, "", "  ")
+	fmt.Println(string(b))
+	return 0
 }
 
 func alive(url string) bool {

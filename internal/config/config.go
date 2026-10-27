@@ -18,6 +18,16 @@ type Guest struct {
 	Elevated bool     `json:"elevated"`
 }
 
+// Assist lets a trusted helper run tools on this PC over Tailscale after
+// the person accepts a request on screen.
+type Assist struct {
+	Enabled  bool   `json:"enabled"`
+	Listen   string `json:"listen,omitempty"`
+	Port     int    `json:"port"`
+	Password string `json:"password"`
+	Minutes  int    `json:"minutes"`
+}
+
 type AutoModels struct {
 	Simple string `json:"simple"`
 	Normal string `json:"normal"`
@@ -50,8 +60,12 @@ type Config struct {
 	Browser            string               `json:"browser,omitempty"`
 	UserName           string               `json:"user_name,omitempty"`
 	Guest              Guest                `json:"guest"`
+	Assist             Assist               `json:"assist"`
 	Prices             map[string]api.Price `json:"prices,omitempty"`
+	Schema             int                  `json:"schema"`
 }
+
+const currentSchema = 2
 
 var (
 	mu   sync.Mutex
@@ -65,13 +79,30 @@ func Root() string {
 		return v
 	}
 	if runtime.GOOS == "windows" {
-		if fi, err := os.Stat(`D:\`); err == nil && fi.IsDir() {
-			return `D:\Claude Apps\APIChat`
+		// an existing install wins, otherwise C:\Claude Apps, otherwise AppData
+		for _, p := range []string{`D:\Claude Apps\APIChat`, `C:\Claude Apps\APIChat`} {
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				return p
+			}
+		}
+		if writable(`C:\Claude Apps\APIChat`) {
+			return `C:\Claude Apps\APIChat`
 		}
 		return filepath.Join(os.Getenv("LOCALAPPDATA"), "APIChat")
 	}
 	h, _ := os.UserHomeDir()
 	return filepath.Join(h, ".apichat")
+}
+
+// writable reports whether the folder exists or can be created.
+func writable(p string) bool {
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		return true
+	}
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		return false
+	}
+	return true
 }
 
 func Home() string { return filepath.Join(Root(), "data") }
@@ -99,6 +130,8 @@ func Defaults() Config {
 		MaxHistoryChars:    600000,
 		MaxToolRounds:      40,
 		ScreenshotsPerTurn: 3,
+		Assist:             Assist{Port: 47822, Minutes: 60},
+		Schema:             currentSchema,
 		Guest: Guest{
 			ToolsOff: []string{"system.kill", "saved"},
 			Confirm:  []string{"window.do", "window.clipboard", "browser.click", "browser.fill", "browser.press", "run", "run_job.delete", "run_job.move", "run_job.sync", "run_job.rename", "office.edit", "rag.forget", "rag.config"},
@@ -121,8 +154,24 @@ func Load() Config {
 	defer mu.Unlock()
 	path = Path()
 	cur = Defaults()
+	migrate := false
 	if b, err := os.ReadFile(path); err == nil {
+		cur.Schema = 0
 		json.Unmarshal(b, &cur)
+		if cur.Schema < currentSchema {
+			// schema 2: API web search became off by default
+			if cur.Schema < 2 {
+				cur.WebSearch = false
+			}
+			cur.Schema = currentSchema
+			migrate = true
+		}
+	}
+	if cur.Assist.Port <= 0 {
+		cur.Assist.Port = 47822
+	}
+	if cur.Assist.Minutes <= 0 {
+		cur.Assist.Minutes = 60
 	}
 	if cur.Port <= 0 {
 		cur.Port = 47821
@@ -141,6 +190,11 @@ func Load() Config {
 	}
 	if cur.Model == "" {
 		cur.Model = "auto"
+	}
+	if migrate {
+		mu.Unlock()
+		Save(cur)
+		mu.Lock()
 	}
 	return cur
 }
@@ -188,6 +242,10 @@ func (c Config) Public() map[string]any {
 	json.Unmarshal(b, &m)
 	m["api_key"] = ""
 	m["has_key"] = c.APIKey != ""
+	if a, ok := m["assist"].(map[string]any); ok {
+		a["has_password"] = c.Assist.Password != ""
+		a["password"] = ""
+	}
 	m["root"] = Root()
 	m["config_path"] = Path()
 	return m
