@@ -63,7 +63,51 @@ func selfSetup() {
 		cmd := filepath.Join(config.Root(), "Open APIChat.cmd")
 		os.WriteFile(cmd, []byte("@echo off\r\nstart \"APIChat\" /min \""+target+"\"\r\n"), 0o644)
 	}
+	adoptOldData()
 	fmt.Println("Installed to", target, "(settings and chats are kept between versions)")
+}
+
+// adoptOldData moves the data folder an earlier version kept in AppData
+// into the new install folder, so the key and chats carry over.
+func adoptOldData() {
+	if _, err := os.Stat(config.Path()); err == nil {
+		return
+	}
+	for _, old := range []string{
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "APIChat", "data"),
+		`D:\Claude Apps\APIChat\data`,
+	} {
+		if _, err := os.Stat(filepath.Join(old, "config.json")); err != nil {
+			continue
+		}
+		if strings.EqualFold(filepath.Clean(old), filepath.Clean(config.Home())) {
+			return
+		}
+		os.MkdirAll(config.Root(), 0o755)
+		os.RemoveAll(config.Home())
+		if err := os.Rename(old, config.Home()); err != nil {
+			if err := copyDir(old, config.Home()); err != nil {
+				fmt.Println("Couldn't move old settings from", old+":", err)
+				return
+			}
+		}
+		fmt.Println("Moved settings and chats from", old)
+		return
+	}
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		t := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(t, 0o755)
+		}
+		return copyPlain(p, t)
+	})
 }
 
 func install() {
