@@ -77,6 +77,12 @@ func Root() string {
 func Home() string { return filepath.Join(Root(), "data") }
 func Path() string { return filepath.Join(Home(), "config.json") }
 
+// Exists reports whether a config file is already on disk.
+func Exists() bool {
+	_, err := os.Stat(Path())
+	return err == nil
+}
+
 func Defaults() Config {
 	c := Config{
 		Port:               47821,

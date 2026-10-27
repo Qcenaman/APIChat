@@ -19,7 +19,7 @@ import (
 	"github.com/qcenaman/apichat/internal/usage"
 )
 
-const appVersion = "0.1.2"
+const appVersion = "0.1.3"
 
 func main() {
 	args := os.Args[1:]

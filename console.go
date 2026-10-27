@@ -58,8 +58,15 @@ func install() {
 		}
 		fmt.Println("Installed to", target)
 	}
+	existed := config.Exists()
 	cfg := config.Load()
-	if _, err := os.Stat(config.Path()); err != nil {
+	if existed {
+		// Keep the API key and every other setting from the previous install;
+		// only migrate web search off (it was on by default before 0.1.2).
+		cfg.WebSearch = false
+		config.Save(cfg)
+		fmt.Println("Kept your existing settings" + keyNote(cfg) + " and turned API web search off.")
+	} else {
 		config.Save(cfg)
 	}
 	if runtime.GOOS == "windows" {
@@ -69,7 +76,18 @@ func install() {
 	}
 	fmt.Println("Settings:", config.Path())
 	fmt.Println("TokenSaver data:", cfg.TokenSaverRoot)
-	fmt.Println("\nRun it, then open Settings in the window to paste the API key.")
+	if !existed {
+		fmt.Println("\nRun it, then open Settings in the window to paste the API key.")
+	} else {
+		fmt.Println("\nRun it. Your API key and settings are unchanged.")
+	}
+}
+
+func keyNote(cfg config.Config) string {
+	if cfg.APIKey != "" {
+		return " (API key kept)"
+	}
+	return ""
 }
 
 func uninstall() {
