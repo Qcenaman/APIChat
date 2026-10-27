@@ -10,7 +10,7 @@ A desktop chat app for Claude that runs on your own Windows PC. It talks to the 
 
 ## Install
 
-1. Download `apichat.exe` from the `dist` folder of this repo (open the file on GitHub and click **Download raw file**).
+1. Download `apichat-0.1.0-windows.zip` from the latest [release](https://github.com/Qcenaman/APIChat/releases) and unzip it (or take `dist\apichat.exe` from this repo).
 2. Put it anywhere, for example `Downloads`, then double-click it once, or run it from a command prompt:
    ```
    apichat.exe install
@@ -20,6 +20,8 @@ A desktop chat app for Claude that runs on your own Windows PC. It talks to the 
 4. The Settings panel appears on first start. Paste the **API key** and click **Save**.
 
 Keep the small console window open while you use the app; closing it stops APIChat.
+
+**If Windows Defender or SmartScreen complains:** the exe is not code-signed, so Defender's machine-learning check sometimes flags it as "potentially unwanted". Choose **More info → Run anyway**, or add the install folder (`D:\Claude Apps\APIChat`) as an exclusion in Windows Security → Virus & threat protection → Exclusions. If Defender already removed the file, restore it from Protection history, then add the exclusion and run `install` again.
 
 ## Using it
 
