@@ -1,0 +1,188 @@
+package config
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
+
+	"github.com/qcenaman/apichat/internal/api"
+)
+
+// Guest limits what a guest profile may do.
+type Guest struct {
+	Folders  []string `json:"folders"`
+	ToolsOff []string `json:"tools_off"`
+	Confirm  []string `json:"confirm"`
+	Elevated bool     `json:"elevated"`
+}
+
+type AutoModels struct {
+	Simple string `json:"simple"`
+	Normal string `json:"normal"`
+	Hard   string `json:"hard"`
+}
+
+type Config struct {
+	Port               int                  `json:"port"`
+	APIKey             string               `json:"api_key"`
+	APIBase            string               `json:"api_base,omitempty"`
+	APIVersion         string               `json:"api_version,omitempty"`
+	Bearer             bool                 `json:"bearer,omitempty"`
+	Profile            string               `json:"profile"`
+	Budget             float64              `json:"budget"`
+	BudgetDay          int                  `json:"budget_day"`
+	Model              string               `json:"model"`
+	Auto               AutoModels           `json:"auto"`
+	Router             string               `json:"router"`
+	WebSearch          bool                 `json:"web_search"`
+	WebSearchMaxUses   int                  `json:"web_search_max_uses"`
+	CacheTTL           string               `json:"cache_ttl"`
+	Effort             string               `json:"effort,omitempty"`
+	Thinking           string               `json:"thinking,omitempty"`
+	MaxTokens          int                  `json:"max_tokens"`
+	MaxHistoryChars    int                  `json:"max_history_chars"`
+	MaxToolRounds      int                  `json:"max_tool_rounds"`
+	ScreenshotsPerTurn int                  `json:"screenshots_per_turn"`
+	TokenSaverRoot     string               `json:"tokensaver_root"`
+	SystemPrompt       string               `json:"system_prompt,omitempty"`
+	Browser            string               `json:"browser,omitempty"`
+	UserName           string               `json:"user_name,omitempty"`
+	Guest              Guest                `json:"guest"`
+	Prices             map[string]api.Price `json:"prices,omitempty"`
+}
+
+var (
+	mu   sync.Mutex
+	cur  Config
+	path string
+)
+
+// Root is the folder APIChat keeps everything in.
+func Root() string {
+	if v := os.Getenv("APICHAT_ROOT"); v != "" {
+		return v
+	}
+	if runtime.GOOS == "windows" {
+		if fi, err := os.Stat(`D:\`); err == nil && fi.IsDir() {
+			return `D:\Claude Apps\APIChat`
+		}
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "APIChat")
+	}
+	h, _ := os.UserHomeDir()
+	return filepath.Join(h, ".apichat")
+}
+
+func Home() string { return filepath.Join(Root(), "data") }
+func Path() string { return filepath.Join(Home(), "config.json") }
+
+func Defaults() Config {
+	c := Config{
+		Port:               47821,
+		Profile:            "owner",
+		Budget:             200,
+		BudgetDay:          1,
+		Model:              "auto",
+		Auto:               AutoModels{Simple: "claude-haiku-5-5", Normal: "claude-sonnet-5-5", Hard: "claude-opus-5-5"},
+		Router:             "claude-haiku-5-5",
+		WebSearch:          true,
+		WebSearchMaxUses:   5,
+		CacheTTL:           "1h",
+		MaxTokens:          16000,
+		MaxHistoryChars:    600000,
+		MaxToolRounds:      40,
+		ScreenshotsPerTurn: 3,
+		Guest: Guest{
+			ToolsOff: []string{"system.kill", "saved"},
+			Confirm:  []string{"window.do", "window.clipboard", "browser.click", "browser.fill", "browser.press", "run", "run_job.delete", "run_job.move", "run_job.sync", "run_job.rename", "office.edit", "rag.forget", "rag.config"},
+		},
+	}
+	if runtime.GOOS == "windows" {
+		if fi, err := os.Stat(`D:\Claude Apps\TokenSaver`); err == nil && fi.IsDir() {
+			c.TokenSaverRoot = `D:\Claude Apps\TokenSaver`
+		}
+	}
+	if c.TokenSaverRoot == "" {
+		c.TokenSaverRoot = filepath.Join(Root(), "tokensaver")
+	}
+	return c
+}
+
+// Load reads the config file, filling defaults.
+func Load() Config {
+	mu.Lock()
+	defer mu.Unlock()
+	path = Path()
+	cur = Defaults()
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &cur)
+	}
+	if cur.Port <= 0 {
+		cur.Port = 47821
+	}
+	if cur.MaxTokens <= 0 {
+		cur.MaxTokens = 16000
+	}
+	if cur.MaxToolRounds <= 0 {
+		cur.MaxToolRounds = 40
+	}
+	if cur.MaxHistoryChars <= 0 {
+		cur.MaxHistoryChars = 600000
+	}
+	if cur.Profile != "guest" {
+		cur.Profile = "owner"
+	}
+	if cur.Model == "" {
+		cur.Model = "auto"
+	}
+	return cur
+}
+
+func Get() Config {
+	mu.Lock()
+	defer mu.Unlock()
+	return cur
+}
+
+// Save writes the config atomically and makes it current.
+func Save(c Config) error {
+	mu.Lock()
+	defer mu.Unlock()
+	if err := os.MkdirAll(Home(), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	cur = c
+	return nil
+}
+
+// Update applies fn to the current config and saves it.
+func Update(fn func(*Config)) (Config, error) {
+	c := Get()
+	fn(&c)
+	return c, Save(c)
+}
+
+// Public is the config without secrets, for the UI.
+func (c Config) Public() map[string]any {
+	b, _ := json.Marshal(c)
+	m := map[string]any{}
+	json.Unmarshal(b, &m)
+	m["api_key"] = ""
+	m["has_key"] = c.APIKey != ""
+	m["root"] = Root()
+	m["config_path"] = Path()
+	return m
+}
