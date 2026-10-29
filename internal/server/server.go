@@ -115,6 +115,39 @@ func (s *Server) Handler() http.Handler {
 		json.NewDecoder(r.Body).Decode(&in)
 		jsonOut(w, 200, map[string]any{"ok": s.Engine.Resolve(in.ID, in.OK)})
 	})
+	apiMux.HandleFunc("GET /api/projects", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, s.Engine.Projects.List()) })
+	apiMux.HandleFunc("POST /api/projects", s.createProject)
+	apiMux.HandleFunc("GET /api/projects/{id}", s.getProject)
+	apiMux.HandleFunc("PATCH /api/projects/{id}", s.patchProject)
+	apiMux.HandleFunc("DELETE /api/projects/{id}", s.deleteProject)
+	apiMux.HandleFunc("POST /api/projects/{id}/files", s.addProjectFiles)
+	apiMux.HandleFunc("DELETE /api/projects/{id}/files/{name...}", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.Engine.Projects.RemoveFile(r.PathValue("id"), r.PathValue("name")); err != nil {
+			bad(w, 404, err)
+			return
+		}
+		jsonOut(w, 200, map[string]any{"ok": true})
+	})
+	apiMux.HandleFunc("POST /api/projects/{id}/memory", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		n, err := s.Engine.Projects.Remember(r.PathValue("id"), in.Text)
+		if err != nil {
+			bad(w, 400, err)
+			return
+		}
+		jsonOut(w, 200, n)
+	})
+	apiMux.HandleFunc("DELETE /api/projects/{id}/memory/{nid}", func(w http.ResponseWriter, r *http.Request) {
+		n, err := s.Engine.Projects.Forget(r.PathValue("id"), []string{r.PathValue("nid")}, "")
+		if err != nil {
+			bad(w, 404, err)
+			return
+		}
+		jsonOut(w, 200, map[string]any{"ok": true, "removed": n})
+	})
 	apiMux.HandleFunc("GET /api/usage", s.usage)
 	apiMux.HandleFunc("GET /api/assist/status", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, s.Assist.Status()) })
 	apiMux.HandleFunc("POST /api/assist/answer", func(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +187,105 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		"tokensaver": map[string]any{"version": ts.Version(), "root": ts.Root(), "tools": ts.ToolNames()},
 		"assist":     s.Assist.Status(),
 		"chats":      s.Store.List(),
+		"projects":   s.Engine.Projects.List(),
 	})
+}
+
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name         string `json:"name"`
+		Instructions string `json:"instructions"`
+	}
+	json.NewDecoder(r.Body).Decode(&in)
+	p, err := s.Engine.Projects.Create(in.Name, in.Instructions)
+	if err != nil {
+		bad(w, 400, err)
+		return
+	}
+	jsonOut(w, 200, p)
+}
+
+func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p, err := s.Engine.Projects.Get(id)
+	if err != nil {
+		bad(w, 404, err)
+		return
+	}
+	jsonOut(w, 200, map[string]any{"project": p, "files": s.Engine.Projects.Files(id), "files_dir": s.Engine.Projects.FilesDir(id)})
+}
+
+func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
+	p, err := s.Engine.Projects.Get(r.PathValue("id"))
+	if err != nil {
+		bad(w, 404, err)
+		return
+	}
+	var in struct {
+		Name         *string `json:"name"`
+		Instructions *string `json:"instructions"`
+	}
+	json.NewDecoder(r.Body).Decode(&in)
+	if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
+		p.Name = strings.TrimSpace(*in.Name)
+	}
+	if in.Instructions != nil {
+		p.Instructions = *in.Instructions
+	}
+	if err := s.Engine.Projects.Save(p); err != nil {
+		bad(w, 500, err)
+		return
+	}
+	jsonOut(w, 200, p)
+}
+
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Engine.Projects.Delete(id); err != nil {
+		bad(w, 404, err)
+		return
+	}
+	// chats keep their history but leave the project
+	for _, h := range s.Store.List() {
+		if h.ProjectID != id {
+			continue
+		}
+		if c, err := s.Store.Get(h.ID); err == nil {
+			c.ProjectID = ""
+			s.Store.Save(c)
+		}
+	}
+	jsonOut(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) addProjectFiles(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.Engine.Projects.Get(id); err != nil {
+		bad(w, 404, err)
+		return
+	}
+	if err := r.ParseMultipartForm(96 << 20); err != nil {
+		bad(w, 400, err)
+		return
+	}
+	var added []string
+	if r.MultipartForm != nil {
+		for _, fh := range r.MultipartForm.File["files"] {
+			f, err := fh.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(io.LimitReader(f, 64<<20))
+			f.Close()
+			if err != nil {
+				continue
+			}
+			if _, err := s.Engine.Projects.AddFile(id, fh.Filename, data); err == nil {
+				added = append(added, fh.Filename)
+			}
+		}
+	}
+	jsonOut(w, 200, map[string]any{"added": added, "files": s.Engine.Projects.Files(id)})
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
@@ -174,9 +305,16 @@ func (s *Server) createChat(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Model        string `json:"model"`
 		Instructions string `json:"instructions"`
+		ProjectID    string `json:"project_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&in)
-	jsonOut(w, 200, s.Store.Create(in.Model, in.Instructions))
+	if in.ProjectID != "" {
+		if _, err := s.Engine.Projects.Get(in.ProjectID); err != nil {
+			bad(w, 404, err)
+			return
+		}
+	}
+	jsonOut(w, 200, s.Store.Create(in.Model, in.Instructions, in.ProjectID))
 }
 
 func (s *Server) getChat(w http.ResponseWriter, r *http.Request) {
@@ -198,8 +336,18 @@ func (s *Server) patchChat(w http.ResponseWriter, r *http.Request) {
 		Title        *string `json:"title"`
 		Model        *string `json:"model"`
 		Instructions *string `json:"instructions"`
+		ProjectID    *string `json:"project_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&in)
+	if in.ProjectID != nil {
+		if *in.ProjectID != "" {
+			if _, err := s.Engine.Projects.Get(*in.ProjectID); err != nil {
+				bad(w, 404, err)
+				return
+			}
+		}
+		c.ProjectID = *in.ProjectID
+	}
 	if in.Title != nil {
 		c.Title = strings.TrimSpace(*in.Title)
 	}

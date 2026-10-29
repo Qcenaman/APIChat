@@ -6,6 +6,7 @@ const fmt$ = (v) => '$' + (v || 0).toFixed(v >= 10 ? 2 : 3);
 
 const S = {
   chats: [], chat: null, models: [], settings: {}, budget: 200, usage: null,
+  projects: [], project: localStorage.getItem('apichat.project') || '',
   es: null, busy: false, atts: [], cards: {}, live: null, status: '',
 };
 
@@ -36,8 +37,9 @@ function md(text) {
 // ---------- state ----------
 async function loadState() {
   const st = await api('/api/state');
-  S.chats = st.chats || []; S.settings = st.settings; S.budget = st.budget; S.usage = st.usage;
-  renderChatList(); renderMeter();
+  S.chats = st.chats || []; S.projects = st.projects || []; S.settings = st.settings; S.budget = st.budget; S.usage = st.usage;
+  if (S.project && !S.projects.some(p => p.id === S.project)) setProject('');
+  renderProjectList(); renderChatList(); renderMeter();
 }
 async function loadModels() {
   try { const m = await api('/api/models'); S.models = m.models || []; } catch (e) { S.models = []; }
@@ -54,9 +56,36 @@ function renderMeter() {
   $('#meter-budget').textContent = '$' + S.budget;
 }
 
+function setProject(id) {
+  S.project = id || '';
+  localStorage.setItem('apichat.project', S.project);
+}
+
+function renderProjectList() {
+  const list = $('#project-list'); list.innerHTML = '';
+  for (const p of S.projects) {
+    const item = el('div', 'chat-item' + (S.project === p.id ? ' active' : ''));
+    item.appendChild(el('span', 't', p.name));
+    const n = S.chats.filter(c => c.project_id === p.id).length;
+    item.appendChild(el('span', 'c', n ? String(n) : ''));
+    const x = el('span', 'x', '⚙'); x.title = 'Project settings';
+    x.onclick = (ev) => { ev.stopPropagation(); openProject(p.id); };
+    item.appendChild(x);
+    item.onclick = async () => {
+      setProject(S.project === p.id ? '' : p.id);
+      renderProjectList(); renderChatList();
+      const inProj = S.chats.filter(c => c.project_id === S.project);
+      if (S.project && !(S.chat && S.chat.project_id === S.project)) { if (inProj.length) await openChat(inProj[0].id); else await newChat(); }
+    };
+    list.appendChild(item);
+  }
+  $('#chats-label').textContent = S.project ? 'Project chats' : 'All chats';
+}
+
 function renderChatList() {
   const list = $('#chat-list'); list.innerHTML = '';
   for (const c of S.chats) {
+    if (S.project && c.project_id !== S.project) continue;
     const item = el('div', 'chat-item' + (S.chat && S.chat.id === c.id ? ' active' : ''));
     item.appendChild(el('span', 't', c.title || 'New chat'));
     item.appendChild(el('span', 'c', c.cost ? fmt$(c.cost) : ''));
@@ -82,8 +111,8 @@ function renderModelSelect() {
 
 // ---------- chats ----------
 async function newChat() {
-  const c = await api('/api/chats', { method: 'POST', json: {} });
-  S.chats.unshift({ id: c.id, title: '', cost: 0 });
+  const c = await api('/api/chats', { method: 'POST', json: { project_id: S.project } });
+  S.chats.unshift({ id: c.id, title: '', cost: 0, project_id: c.project_id });
   await openChat(c.id);
 }
 
@@ -94,6 +123,11 @@ async function openChat(id) {
   localStorage.setItem('apichat.last', id);
   $('#title').value = S.chat.title || '';
   $('#chat-cost').textContent = S.chat.cost ? fmt$(S.chat.cost) : '';
+  if (S.chat.project_id && S.chat.project_id !== S.project) { setProject(S.chat.project_id); renderProjectList(); }
+  const proj = S.projects.find(p => p.id === S.chat.project_id);
+  const badge = $('#project-badge');
+  badge.classList.toggle('hidden', !proj);
+  if (proj) { badge.textContent = '▸ ' + proj.name; badge.onclick = () => openProject(proj.id); }
   renderModelSelect();
   renderChatList();
   renderMessages();
@@ -459,6 +493,93 @@ async function openSettings() {
   if (!s.has_key) setTimeout(() => key.focus(), 50);
 }
 
+// ---------- projects ----------
+async function newProject() {
+  const name = prompt('Project name');
+  if (!name || !name.trim()) return;
+  const p = await api('/api/projects', { method: 'POST', json: { name: name.trim() } });
+  await loadState();
+  setProject(p.id); renderProjectList(); renderChatList();
+  await newChat();
+  openProject(p.id);
+}
+
+async function openProject(id) {
+  const r = await api('/api/projects/' + id);
+  const p = r.project;
+  const form = el('div', 'form');
+  const name = field(form, 'Name', inp('text', p.name));
+  const instr = field(form, 'Instructions', ta(p.instructions, 5), 'Sent with every chat in this project.');
+  form.appendChild(el('h3', '', 'Files'));
+  form.appendChild(el('div', 'hint', 'Kept in ' + r.files_dir + '. Chats in this project see the list and can read them.'));
+  const files = el('div', 'proj-files');
+  const renderFiles = (list) => {
+    files.innerHTML = '';
+    if (!list.length) files.appendChild(el('div', 'hint', 'No files yet'));
+    for (const f of list) {
+      const row = el('div', 'proj-row');
+      row.appendChild(el('span', 't', f.name));
+      row.appendChild(el('span', 'c', (f.size / 1024).toFixed(f.size > 10240 ? 0 : 1) + ' KB'));
+      const x = el('span', 'x', '✕'); x.title = 'Remove';
+      x.onclick = async () => { if (!confirm('Remove ' + f.name + ' from the project?')) return; await api('/api/projects/' + id + '/files/' + encodeURIComponent(f.name), { method: 'DELETE' }); const rr = await api('/api/projects/' + id); renderFiles(rr.files); };
+      row.appendChild(x);
+      files.appendChild(row);
+    }
+  };
+  renderFiles(r.files);
+  form.appendChild(files);
+  const pick = el('input'); pick.type = 'file'; pick.multiple = true; pick.hidden = true;
+  pick.onchange = async () => {
+    const fd = new FormData();
+    for (const f of pick.files) fd.append('files', f, f.name);
+    const rr = await api('/api/projects/' + id + '/files', { method: 'POST', body: fd });
+    renderFiles(rr.files); pick.value = '';
+  };
+  const addBtn = el('button', 'ghost', '+ Add files'); addBtn.onclick = () => pick.click();
+  form.appendChild(addBtn); form.appendChild(pick);
+  form.appendChild(el('h3', '', 'Memory'));
+  form.appendChild(el('div', 'hint', 'Notes the assistant keeps across all chats in this project. It adds them itself; you can add or remove them here.'));
+  const notes = el('div', 'proj-notes');
+  const renderNotes = (list) => {
+    notes.innerHTML = '';
+    if (!list.length) notes.appendChild(el('div', 'hint', 'Nothing remembered yet'));
+    for (const n of list) {
+      const row = el('div', 'proj-row');
+      const t = el('span', 't', n.text); t.title = n.text; t.style.whiteSpace = 'normal';
+      row.appendChild(t);
+      const x = el('span', 'x', '✕'); x.title = 'Forget';
+      x.onclick = async () => { await api('/api/projects/' + id + '/memory/' + n.id, { method: 'DELETE' }); const rr = await api('/api/projects/' + id); renderNotes(rr.project.memory); };
+      row.appendChild(x);
+      notes.appendChild(row);
+    }
+  };
+  renderNotes(p.memory || []);
+  form.appendChild(notes);
+  const noteIn = inp('text', '', { placeholder: 'Add a note and press Enter' });
+  noteIn.onkeydown = async (e) => { if (e.key !== 'Enter' || !noteIn.value.trim()) return; e.preventDefault(); await api('/api/projects/' + id + '/memory', { method: 'POST', json: { text: noteIn.value.trim() } }); noteIn.value = ''; const rr = await api('/api/projects/' + id); renderNotes(rr.project.memory); };
+  form.appendChild(noteIn);
+  const actions = el('div', 'form-actions full');
+  const msg = el('span', 'save-msg');
+  const del = el('button', 'danger', 'Delete project');
+  del.onclick = async () => {
+    if (!confirm('Delete project "' + p.name + '"? Its files and memory are removed; the chats stay.')) return;
+    await api('/api/projects/' + id, { method: 'DELETE' });
+    if (S.project === id) setProject('');
+    closeModal(); await loadState();
+    if (S.chat) await openChat(S.chat.id);
+  };
+  const save = el('button', 'primary', 'Save');
+  save.onclick = async () => {
+    try {
+      await api('/api/projects/' + id, { method: 'PATCH', json: { name: name.value, instructions: instr.value } });
+      msg.textContent = 'Saved'; await loadState(); if (S.chat) await openChat(S.chat.id); setTimeout(closeModal, 400);
+    } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--err)'; }
+  };
+  actions.appendChild(del); actions.appendChild(msg); actions.appendChild(save);
+  const box = el('div'); box.appendChild(form); box.appendChild(actions);
+  modal('Project', box);
+}
+
 async function openUsage() {
   const u = await api('/api/usage');
   const s = u.summary; const box = el('div');
@@ -538,6 +659,7 @@ function subscribeAssist() {
 
 // ---------- wiring ----------
 $('#new-chat').onclick = newChat;
+$('#new-project').onclick = () => newProject().catch(e => notice('Could not create project: ' + e.message, 'err'));
 $('#send').onclick = send;
 $('#stop').onclick = () => S.chat && api('/api/chats/' + S.chat.id + '/stop', { method: 'POST' });
 $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!S.busy) send(); } });
@@ -561,8 +683,9 @@ $('#head').addEventListener('click', (e) => { if (e.target.id === 'head') $('#si
   loadModels();
   subscribeAssist();
   const last = localStorage.getItem('apichat.last');
+  const visible = S.chats.filter(c => !S.project || c.project_id === S.project);
   if (last && S.chats.some(c => c.id === last)) await openChat(last);
-  else if (S.chats.length) await openChat(S.chats[0].id);
+  else if (visible.length) await openChat(visible[0].id);
   else await newChat();
   if (!S.settings.has_key) openSettings().catch(e => notice('Settings failed to open: ' + e.message, 'err'));
 })();

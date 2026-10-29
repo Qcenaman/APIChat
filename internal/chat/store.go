@@ -23,6 +23,7 @@ type Chat struct {
 	Updated      time.Time     `json:"updated"`
 	Model        string        `json:"model,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
+	ProjectID    string        `json:"project_id,omitempty"`
 	Messages     []api.Message `json:"messages"`
 	Cost         float64       `json:"cost"`
 	Usage        api.Usage     `json:"usage"`
@@ -34,9 +35,10 @@ type Header struct {
 	ID      string    `json:"id"`
 	Title   string    `json:"title"`
 	Updated time.Time `json:"updated"`
-	Model   string    `json:"model,omitempty"`
-	Cost    float64   `json:"cost"`
-	Turns   int       `json:"turns"`
+	Model     string    `json:"model,omitempty"`
+	ProjectID string    `json:"project_id,omitempty"`
+	Cost      float64   `json:"cost"`
+	Turns     int       `json:"turns"`
 }
 
 type Store struct {
@@ -66,8 +68,8 @@ func validID(id string) bool {
 	return true
 }
 
-func (s *Store) Create(model, instructions string) *Chat {
-	c := &Chat{ID: newID(), Created: time.Now(), Updated: time.Now(), Model: model, Instructions: instructions, Messages: []api.Message{}}
+func (s *Store) Create(model, instructions, projectID string) *Chat {
+	c := &Chat{ID: newID(), Created: time.Now(), Updated: time.Now(), Model: model, Instructions: instructions, ProjectID: projectID, Messages: []api.Message{}}
 	s.Save(c)
 	return c
 }

@@ -79,8 +79,15 @@ func Root() string {
 		return v
 	}
 	if runtime.GOOS == "windows" {
-		// an existing install wins, otherwise C:\Claude Apps, otherwise AppData
-		for _, p := range []string{`D:\Claude Apps\APIChat`, `C:\Claude Apps\APIChat`} {
+		// an install that already has settings wins, then any existing folder,
+		// otherwise C:\Claude Apps, otherwise AppData
+		cands := []string{`D:\Claude Apps\APIChat`, `C:\Claude Apps\APIChat`, filepath.Join(os.Getenv("LOCALAPPDATA"), "APIChat")}
+		for _, p := range cands {
+			if _, err := os.Stat(filepath.Join(p, "data", "config.json")); err == nil {
+				return p
+			}
+		}
+		for _, p := range cands[:2] {
 			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
 				return p
 			}
@@ -192,6 +199,10 @@ func Load() Config {
 		cur.Model = "auto"
 	}
 	if migrate {
+		// keep a copy of the pre-upgrade settings (key included) before rewriting
+		if b, err := os.ReadFile(path); err == nil {
+			os.WriteFile(path+".bak", b, 0o600)
+		}
 		mu.Unlock()
 		Save(cur)
 		mu.Lock()

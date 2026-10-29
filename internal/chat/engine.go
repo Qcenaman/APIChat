@@ -51,6 +51,7 @@ type live struct {
 
 type Engine struct {
 	Store     *Store
+	Projects  *ProjectStore
 	Guard     *guard.Guard
 	Log       *usage.Log
 	UploadDir string
@@ -331,6 +332,9 @@ func (e *Engine) run(ctx context.Context, c *Chat, l *live, userText string) {
 	e.emit(c.ID, Event{Type: "model", Data: map[string]any{"model": model}})
 
 	tools := e.tools(cfg)
+	if c.ProjectID != "" && e.Projects != nil {
+		tools = append(tools, ProjectToolDef)
+	}
 	system := e.system(cfg, c)
 	fail := func(err error) {
 		if errors.Is(err, context.Canceled) {
@@ -458,7 +462,20 @@ func (e *Engine) callTool(ctx context.Context, cfg config.Config, c *Chat, l *li
 	l.status = "running " + name
 	e.mu.Unlock()
 	e.emit(c.ID, Event{Type: "tool_start", Data: map[string]any{"id": id, "name": name, "input": tu["input"]}})
-	text, imgs, err := e.Guard.Run(ctx, cfg, l.turn, name, args)
+	var (
+		text string
+		imgs []ts.Image
+		err  error
+	)
+	if name == "project" {
+		if c.ProjectID == "" || e.Projects == nil {
+			err = errors.New("this chat is not in a project")
+		} else {
+			text, err = e.Projects.RunProjectTool(c.ProjectID, args)
+		}
+	} else {
+		text, imgs, err = e.Guard.Run(ctx, cfg, l.turn, name, args)
+	}
 	var content []api.Block
 	isErr := err != nil
 	if isErr {
@@ -564,6 +581,9 @@ func (e *Engine) system(cfg config.Config, c *Chat) []api.Block {
 	dyn.WriteString("Today is " + time.Now().Format("Monday, 2 January 2006") + ".")
 	if cfg.UserName != "" {
 		dyn.WriteString(" The user's name is " + cfg.UserName + ".")
+	}
+	if c.ProjectID != "" && e.Projects != nil {
+		dyn.WriteString(e.Projects.PromptText(c.ProjectID))
 	}
 	if c.Instructions != "" {
 		dyn.WriteString("\n\nInstructions for this chat:\n" + c.Instructions)

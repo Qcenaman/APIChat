@@ -13,6 +13,12 @@
     <div class="side-top">
       <button id="new-chat" class="primary">+ New chat</button>
     </div>
+    <div class="side-section">
+      <span>Projects</span>
+      <button id="new-project" class="ghost" title="New project">+</button>
+    </div>
+    <div id="project-list"></div>
+    <div class="side-section"><span id="chats-label">Chats</span></div>
     <div id="chat-list"></div>
     <div class="side-bottom">
       <div id="meter" title="Spent this billing cycle">
@@ -27,6 +33,7 @@
   </aside>
   <main id="main">
     <header id="head">
+      <button id="project-badge" class="ghost hidden" title="Open project"></button>
       <input id="title" placeholder="New chat" spellcheck="false">
       <select id="model"></select>
       <span id="chat-cost" title="Cost of this chat"></span>

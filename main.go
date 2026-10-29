@@ -23,7 +23,7 @@ import (
 	"github.com/qcenaman/apichat/internal/usage"
 )
 
-const appVersion = "0.1.4"
+const appVersion = "0.2.0"
 
 func main() {
 	args := os.Args[1:]
@@ -82,6 +82,7 @@ func start(openWindow bool) {
 		return cl
 	}
 	engine := chat.NewEngine(store, g, log, filepath.Join(config.Home(), "uploads"), client)
+	engine.Projects = chat.NewProjectStore(filepath.Join(config.Home(), "projects"))
 	srv := server.New(engine, store, log, client, appVersion)
 	am := assist.New(g)
 	srv.Assist = am
