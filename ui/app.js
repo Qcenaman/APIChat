@@ -461,6 +461,8 @@ async function openSettings() {
   form.appendChild(el('h3', '', 'TokenSaver'));
   const tsRoot = field(form, 'TokenSaver folder', inp('text', s.tokensaver_root), 'Restart after changing');
   const tsCfg = field(form, 'TokenSaver config.json', ta('', 6));
+  form.appendChild(el('h3', '', 'APIChatHTML bridge'));
+  field(form, 'Bridge key', inp('text', s.bridge_key || '', { readOnly: true }), 'Paste this key into the Settings of the APIChatHTML page to let it use TokenSaver on this PC.');
   api('/api/tokensaver/config').then(r => { tsCfg.value = r.text; tsCfg.dataset.orig = r.text; });
   form.appendChild(el('h3', '', 'Window'));
   const port = field(form, 'Port', inp('number', s.port), 'Restart after changing');

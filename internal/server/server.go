@@ -172,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 		jsonOut(w, 200, map[string]any{"version": ts.Version(), "root": ts.Root(), "tools": ts.ToolNames()})
 	})
 	mux.Handle("/api/", s.auth(apiMux))
+	mux.Handle("/bridge/", s.bridgeHandler())
 	return mux
 }
 
