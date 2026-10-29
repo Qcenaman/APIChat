@@ -2,8 +2,8 @@ name: ci
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -15,16 +15,27 @@ jobs:
       - run: go test ./...
   release:
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
-      - run: go build -ldflags "-s -w" -o apichat.exe .
-      - run: Compress-Archive -Path apichat.exe -DestinationPath "apichat-${{ github.ref_name }}-windows.zip"
-      - uses: softprops/action-gh-release@v2
+      - id: ver
+        shell: bash
+        run: |
+          v=$(grep -oP 'appVersion = "\K[^"]+' main.go)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ver.outputs.exists == 'false'
+        run: go build -ldflags "-s -w" -o apichat.exe .
+      - if: steps.ver.outputs.exists == 'false'
+        run: Compress-Archive -Path apichat.exe -DestinationPath "apichat-${{ steps.ver.outputs.tag }}-windows.zip"
+      - if: steps.ver.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: APIChat ${{ steps.ver.outputs.tag }}
           files: apichat-*-windows.zip
           body: "Unzip and run apichat.exe. Settings, API key, chats and projects are kept when upgrading."
