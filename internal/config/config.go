@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -62,6 +64,7 @@ type Config struct {
 	Guest              Guest                `json:"guest"`
 	Assist             Assist               `json:"assist"`
 	Prices             map[string]api.Price `json:"prices,omitempty"`
+	BridgeKey          string               `json:"bridge_key"`
 	Schema             int                  `json:"schema"`
 }
 
@@ -198,6 +201,10 @@ func Load() Config {
 	if cur.Model == "" {
 		cur.Model = "auto"
 	}
+	if cur.BridgeKey == "" {
+		cur.BridgeKey = newKey()
+		migrate = true
+	}
 	if migrate {
 		// keep a copy of the pre-upgrade settings (key included) before rewriting
 		if b, err := os.ReadFile(path); err == nil {
@@ -208,6 +215,13 @@ func Load() Config {
 		mu.Lock()
 	}
 	return cur
+}
+
+// newKey makes a random key for the local bridge.
+func newKey() string {
+	b := make([]byte, 12)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func Get() Config {

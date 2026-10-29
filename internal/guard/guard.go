@@ -25,6 +25,7 @@ type Turn struct {
 	Screenshots     int
 	ClipboardBefore *string
 	ClipboardSet    bool
+	Preapproved     bool // the person already allowed this call (bridge)
 }
 
 // Confirmer asks the person whether a tool call may go ahead.
@@ -220,7 +221,7 @@ func (g *Guard) Run(ctx context.Context, cfg config.Config, t *Turn, tool string
 		g.log(cfg, t, tool, d.Actions, args, "", 0, true)
 		return "", nil, errors.New("refused: " + d.Deny)
 	}
-	if d.Confirm && g.Confirm != nil {
+	if d.Confirm && !t.Preapproved && g.Confirm != nil {
 		ok, err := g.Confirm(ctx, t, tool, strings.Join(d.Actions, ", "), args)
 		if err != nil {
 			return "", nil, err
