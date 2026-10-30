@@ -1,0 +1,36 @@
+name: ci
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+  release:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: |
+          v=$(node -p "require('./manifest.json').version")
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ver.outputs.exists == 'false'
+        run: zip -r "apixtension-${{ steps.ver.outputs.tag }}.zip" manifest.json src vendor icons
+      - if: steps.ver.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: APIChat extension ${{ steps.ver.outputs.tag }}
+          files: apixtension-*.zip
+          body: "Unzip, open chrome://extensions, turn on Developer mode, click Load unpacked and pick the unzipped folder. Click the APIChat icon to open the side panel."
