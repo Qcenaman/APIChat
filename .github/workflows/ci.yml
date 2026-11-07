@@ -2,7 +2,9 @@ name: ci
 on:
   push:
     branches: ["**"]
+    paths-ignore: ["html/**", "extension/**", ".github/workflows/html.yml", ".github/workflows/extension.yml"]
   pull_request:
+    paths-ignore: ["html/**", "extension/**"]
   workflow_dispatch:
 jobs:
   test:

@@ -1,16 +1,23 @@
-name: ci
+name: extension
+# ApiXtension (extension/): tests on every push; on main, when manifest.json's version
+# has no extension-vX.Y.Z tag yet, publish that release with the zipped extension.
 on:
   push:
     branches: ["**"]
+    paths: ["extension/**", ".github/workflows/extension.yml"]
   pull_request:
+    paths: ["extension/**"]
   workflow_dispatch:
+defaults:
+  run:
+    working-directory: extension
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with: { node-version: 22, cache: npm, cache-dependency-path: extension/package-lock.json }
       - run: npm ci
       - run: npm test
   release:
@@ -23,8 +30,8 @@ jobs:
       - id: ver
         run: |
           v=$(node -p "require('./manifest.json').version")
-          echo "tag=v$v" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+          echo "tag=extension-v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/extension-v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
       - if: steps.ver.outputs.exists == 'false'
         run: zip -r "apixtension-${{ steps.ver.outputs.tag }}.zip" manifest.json src vendor icons
       - if: steps.ver.outputs.exists == 'false'
@@ -32,5 +39,6 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: APIChat extension ${{ steps.ver.outputs.tag }}
-          files: apixtension-*.zip
+          make_latest: false
+          files: extension/apixtension-*.zip
           body: "Unzip, open chrome://extensions, turn on Developer mode, click Load unpacked and pick the unzipped folder. Click the APIChat icon to open the side panel."

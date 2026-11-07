@@ -1,16 +1,23 @@
-name: ci
+name: html
+# APIChatHTML (html/): build + tests on every push; on main, when package.json's version
+# has no html-vX.Y.Z tag yet, publish that release with the single HTML file.
 on:
   push:
     branches: ["**"]
+    paths: ["html/**", ".github/workflows/html.yml"]
   pull_request:
+    paths: ["html/**"]
   workflow_dispatch:
+defaults:
+  run:
+    working-directory: html
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with: { node-version: 22, cache: npm, cache-dependency-path: html/package-lock.json }
       - run: npm ci
       - run: npm run build
       - run: git diff --exit-code -- APIChatHTML.html
@@ -25,12 +32,13 @@ jobs:
       - id: ver
         run: |
           v=$(node -p "require('./package.json').version")
-          echo "tag=v$v" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+          echo "tag=html-v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/html-v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
       - if: steps.ver.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: APIChatHTML ${{ steps.ver.outputs.tag }}
-          files: APIChatHTML.html
+          make_latest: false
+          files: html/APIChatHTML.html
           body: "Download APIChatHTML.html and open it in Chrome or Edge. No installation. First start asks for the API key and a password."
